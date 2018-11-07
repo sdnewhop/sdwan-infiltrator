@@ -115,7 +115,8 @@ local function check_ssl(host, port)
     ["InfoVista SALSA"] = {"SALSA Portal"},
     ["Barracuda CloudGen Firewall"] = {"Barracuda CloudGen Firewall", "Barracuda Networks"},
     ["Viprinet Virtual VPN Hub"] = {"Viprinet"},
-    ["Citrix Netscaler SD-WAN"] = {"Citrix Systems"}
+    ["Citrix Netscaler SD-WAN"] = {"Citrix Systems"},
+    ["Fortinet FortiGate SD-WAN"] = {"FGT%-", "FortiGate"}
   }
   
   ssl_subject = ssl_name_to_table(cert.subject)
@@ -127,7 +128,7 @@ local function check_ssl(host, port)
     for _, sd_wan_title in ipairs(titles) do
       for _, ssl_field in pairs(ssl_subject) do
         if string.match(ssl_field:lower(), sd_wan_title:lower()) then
-          stdnse.print_debug("Matched SNMP banners: " .. ssl_field)
+          stdnse.print_debug("Matched SSL certificates: " .. ssl_field)
           return collect_results("success", "SSL certificate", product, host.ip, port.number)
         end
       end
@@ -169,7 +170,7 @@ local function check_snmp(host, port)
   for product, titles in pairs(snmp_sd_wans) do
     for _, sd_wan_title in ipairs(titles) do
       if string.match(result:lower(), sd_wan_title:lower()) then
-        stdnse.print_debug("Matched SNMP banners: " .. result .. " = " .. sd_wan_title)
+        stdnse.print_debug("Matched SNMP banners: " .. result)
         return collect_results("success", "snmp banner", product, host.ip, port.number)
       end
     end
@@ -225,19 +226,19 @@ local function check_title(host, port)
     ["Gluware Control"] = {"Gluware Control"},
     ["Barracuda CloudGen Firewall"] = {"Barracuda CloudGen Firewall"},
     ["Viprinet Virtual VPN Hub"] = {"Viprinet %- AdminDesk %- Login"},
-    ["Viprinet Traffic Tools"] = {"Viprinet traffic tools"}
+    ["Viprinet Traffic Tools"] = {"Viprinet traffic tools"},
+    ["Cradlepoint SD-WAN"] = {"Login :: CR4250%-PoE", "Login :: AER2200%-600M"}
   }
 
   local title = string.match(resp.body, "<[Tt][Ii][Tt][Ll][Ee][^>]*>([^<]*)</[Tt][Ii][Tt][Ll][Ee]>")
   if not title then
     return nil
   end
-  
   stdnse.print_debug("Get title: " .. title)
   for product, titles in pairs(sd_wan_titles) do
     for _, sd_wan_title in ipairs(titles) do
       if string.match(title:lower(), sd_wan_title:lower()) then
-        stdnse.print_debug("Matched titles: " .. title .. " = " .. sd_wan_title)
+        stdnse.print_debug("Matched titles: " .. title)
         return collect_results("success", "http-title", product, host.ip, port.number)
       end
     end
@@ -312,7 +313,7 @@ local function check_server(host, port)
     for _, sd_wan_server in ipairs(servers) do
       for recv_server, _ in pairs(headers) do
         if string.match(recv_server:lower(), sd_wan_server:lower()) then
-          stdnse.print_debug("Matched servers: " .. recv_server .. " = " .. sd_wan_server)
+          stdnse.print_debug("Matched servers: " .. recv_server)
           return collect_results("success", "http-server", product, host.ip, port.number)
         end
       end
