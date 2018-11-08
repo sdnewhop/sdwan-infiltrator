@@ -28,7 +28,7 @@ url
 
 # Usage
 ```
-nmap --script infiltrator -sS -sU -p U:161,T:80,443 <target> or -iL <targets.txt>
+nmap --script infiltrator --script-args infiltrator.version=true -sS -sU -p U:161,T:80,443 <target> or -iL <targets.txt>
 ```
 # Example
 ![Output example](output.png)

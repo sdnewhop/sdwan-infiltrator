@@ -26,6 +26,7 @@ Also this script is based on:
 - ssl-cert NSE script by David Fifield
 ]]
 
+
 -- 
 -- @usage
 -- nmap --script=infiltrator.nse -sS -sU -p U:161,T:80,443 <target> or -iL <targets.txt>
@@ -36,169 +37,67 @@ Also this script is based on:
 -- |   method: server
 -- |   product: <product name>
 -- |   host_addr: ...
--- |_  host_port: 443
+-- |   host_port: 443
+-- |_  version: ...
 -- ...
 -- | infiltrator:
 -- |   status: success
 -- |   method: title
 -- |   product: <product name>
 -- |   host_addr: ...
--- |_  host_port: 443
+-- |   host_port: 443
+-- |_  version: ...
 -- ...
 -- | infiltrator:
 -- |   status: success
 -- |   method: snmp
 -- |   product: <product name>
 -- |   host_addr: ...
--- |_  host_port: 161
+-- |   host_port: 161
+-- |_  version: ...
 -- ...
 -- | infiltrator:
 -- |   status: success
 -- |   method: SSL certificate
 -- |   product: <product name>
 -- |   host_addr: ...
--- |_  host_port: 443
+-- |   host_port: 443
+-- |_  version: ...
 
 
 author = "sdnewhop"
-
 license = "Same as Nmap--See https://nmap.org/book/man-legal.html"
-
 categories = {"default", "discovery", "safe"}
 
 
 portrule = shortport.portnumber({80, 161, 443}, {"tcp", "udp"}, {"open"})
 
+SDWANS_BY_SSL_TABLE = {
+  ["Cisco SD-WAN"] = {"Viptela Inc"},
+  ["Versa Analytics"] = {"versa%-analytics"},
+  ["Versa Director"] = {"director%-1", "versa%-director"},
+  ["Riverbed SteelHead"] = {"Riverbed Technology"},
+  ["Silver Peak Unity Orchestrator"] = {"Silverpeak GMS"},
+  ["Silver Peak Unity EdgeConnect"] = {"silver%-peak", "Silver Peak Systems Inc"},
+  ["CloudGenix SD-WAN"] = {"CloudGenix Inc."},
+  ["Talari SD-WAN"] = {"Talari", "Talari Networks"},
+  ["InfoVista SALSA"] = {"SALSA Portal"},
+  ["Barracuda CloudGen Firewall"] = {"Barracuda CloudGen Firewall", "Barracuda Networks"},
+  ["Viprinet Virtual VPN Hub"] = {"Viprinet"},
+  ["Citrix Netscaler SD-WAN"] = {"Citrix Systems"},
+  ["Fortinet FortiGate SD-WAN"] = {"FGT%-", "FortiGate"}
+}
 
-local function ssl_name_to_table(name)
-  local output = {}
-  for k, v in pairs(name) do
-    if type(k) == "table" then
-      k = stdnse.strjoin(".", k)
-    end
-    output[k] = v
-  end
-  return output
-end
+SDWANS_BY_SNMP_TABLE = {
+    ["Fatpipe SYMPHONY SD-WAN"] = {"Linux Fatpipe"},
+    ["Versa Analytics"] = {"Linux versa%-analytics"},
+    ["Juniper Networks Contrail SD-WAN"] = {"Juniper Networks, Inc. srx"},
+    ["Aryaka Network Access Point"] = {"Aryaka Networks Access Point"},
+    ["Arista Networks EOS"] = {"Arista Networks EOS"},
+    ["Viprinet Virtual VPN Hub"]= {"Viprinet VPN Router"}
+}
 
-
-local function collect_results(status, method, product, addr, port)
-  local output_tab = stdnse.output_table()
-  output_tab.status = status
-  output_tab.method = method
-  output_tab.product = product
-  output_tab.host_addr = addr
-  output_tab.host_port = port
-  return output_tab
-end
-
-
-local function check_ssl(host, port)
-  if not (shortport.ssl(host, port) or sslcert.isPortSupported(port) or sslcert.getPrepareTLSWithoutReconnect(port)) then
-    return nil
-  end
-
-  local cert_status, cert = sslcert.getCertificate(host, port)
-  if not cert_status then
-    return nil
-  end
-
-  local ssl_sd_wans = {
-    ["Cisco SD-WAN"] = {"Viptela Inc"},
-    ["Versa Analytics"] = {"versa%-analytics"},
-    ["Versa Director"] = {"director%-1", "versa%-director"},
-    ["Riverbed SteelHead"] = {"Riverbed Technology"},
-    ["Silver Peak Unity Orchestrator"] = {"Silverpeak GMS"},
-    ["Silver Peak Unity EdgeConnect"] = {"silver%-peak", "Silver Peak Systems Inc"},
-    ["CloudGenix SD-WAN"] = {"CloudGenix Inc."},
-    ["Talari SD-WAN"] = {"Talari", "Talari Networks"},
-    ["InfoVista SALSA"] = {"SALSA Portal"},
-    ["Barracuda CloudGen Firewall"] = {"Barracuda CloudGen Firewall", "Barracuda Networks"},
-    ["Viprinet Virtual VPN Hub"] = {"Viprinet"},
-    ["Citrix Netscaler SD-WAN"] = {"Citrix Systems"},
-    ["Fortinet FortiGate SD-WAN"] = {"FGT%-", "FortiGate"}
-  }
-  
-  ssl_subject = ssl_name_to_table(cert.subject)
-  if not ssl_subject then
-    return nil
-  end 
-
-  for product, titles in pairs(ssl_sd_wans) do
-    for _, sd_wan_title in ipairs(titles) do
-      for _, ssl_field in pairs(ssl_subject) do
-        if string.match(ssl_field:lower(), sd_wan_title:lower()) then
-          stdnse.print_debug("Matched SSL certificates: " .. ssl_field)
-          return collect_results("success", "SSL certificate", product, host.ip, port.number)
-        end
-      end
-    end
-  end
-end
-
-local function check_snmp(host, port)
-  if not shortport.portnumber(161, "udp", {"open"}) then
-    return nil
-  end
-
-  local snmp_sd_wans = {
-      ["Fatpipe SYMPHONY SD-WAN"] = {"Linux Fatpipe"},
-      ["Versa Analytics"] = {"Linux versa%-analytics"},
-      ["Juniper Networks Contrail SD-WAN"] = {"Juniper Networks, Inc. srx"},
-      ["Aryaka Network Access Point"] = {"Aryaka Networks Access Point"},
-      ["Arista Networks EOS"] = {"Arista Networks EOS"},
-      ["Viprinet Virtual VPN Hub"]= {"Viprinet VPN Router"}
-  }
-
-  local snmpHelper = snmp.Helper:new(host, port)
-  snmpHelper:connect()
-
-  -- build a SNMP v1 packet
-  -- copied from packet capture of snmpget exchange
-  -- get value: 1.3.6.1.2.1.1.1.0 (SNMPv2-MIB::sysDescr.0)
-  local status, response = snmpHelper:get({reqId=28428}, "1.3.6.1.2.1.1.1.0")
-  if not status then
-    return nil
-  end
-
-  nmap.set_port_state(host, port, "open")
-  local result = response and response[1] and response[1][1]
-  if not result then
-    return nil
-  end
-
-  for product, titles in pairs(snmp_sd_wans) do
-    for _, sd_wan_title in ipairs(titles) do
-      if string.match(result:lower(), sd_wan_title:lower()) then
-        stdnse.print_debug("Matched SNMP banners: " .. result)
-        return collect_results("success", "snmp banner", product, host.ip, port.number)
-      end
-    end
-  end
-end
-
-
-local function check_title(host, port)
-  if not shortport.http(host, port) then
-    return nil
-  end
-
-  local resp = http.get(host, port, "/")
-
-  --make redirect if needed
-  if resp.status == 301 or resp.status == 302 then
-    local url = url.parse( resp.header.location )
-    if url.host == host.targetname or url.host == ( host.name ~= '' and host.name ) or url.host == host.ip then
-      stdnse.print_debug("Redirect: " .. host.ip .. " -> " .. url.scheme.. "://" .. url.authority .. url.path)
-      resp = http.get(url.authority, 443, "/")
-    end
-  end
-
-  if not resp.body then
-    return nil
-  end
-
-  local sd_wan_titles = {
+SDWANS_BY_TITLE_TABLE = {
     ["VMWare NSX SD-WAN"] = {"VeloCloud", "VeloCloud Orchestrator"},
     ["TELoIP VINO SD-WAN"] = {"Teloip Orchestrator API"},
     ["Fatpipe SYMPHONY SD-WAN"] = {"WARP"},
@@ -230,31 +129,659 @@ local function check_title(host, port)
     ["Cradlepoint SD-WAN"] = {"Login :: CR4250%-PoE", "Login :: AER2200%-600M"}
   }
 
-  local title = string.match(resp.body, "<[Tt][Ii][Tt][Ll][Ee][^>]*>([^<]*)</[Tt][Ii][Tt][Ll][Ee]>")
-  if not title then
+SDWANS_BY_SERVER_TABLE = {
+      ["Versa Director"] = {"Versa Director"},
+      ["Barracuda CloudGen Firewall"] = {"Barracuda CloudGen Firewall"},
+      ["Viprinet Virtual VPN Hub"] = {"ViprinetHubReplacement", "Viprinet"}
+  }
+
+-------------------------------------------------------------------------------
+-- version gathering block
+-------------------------------------------------------------------------------
+
+local function vcitrix(host, port)
+  local path = stdnse.get_script_args(SCRIPT_NAME .. ".path") or "/"
+  local response
+  local output_info = {}
+  local vsdwan = ""
+  local urlp = path
+  response = http.generic_request(host, port, "GET", path)
+  if response.status == 301 or response.status == 302 then
+    local url_parse_res = url.parse(response.header.location)
+    urlp = url_parse_res.path
+    -- stdnse.print_debug("Status code: " .. response.status)
+    response = http.generic_request(host,port,"GET", urlp)
+  end
+
+  output_info = stdnse.output_table()
+  if response == nil then
+    return fail("Request failed")
+  end
+
+  local try_counter = 1
+  while try_counter < 30 and response.status ~= 200 do
+    response = http.generic_request(host, port, "GET", urlp) 
+    try_counter = try_counter + 1
+  end
+
+  if response.status == 200 then
+    found, matches = http.response_contains(response, "css%?v%=([.0-9]+)", false)
+    if found == true then vsdwan = matches[1] else return nil end
+    output_info.vsdwan_version = {}
+    table.insert(output_info.vsdwan_version, "Citrix NetScaler Version: " .. vsdwan)
+  end
+
+  return output_info, stdnse.format_output(true, output_info)
+
+end
+
+
+local function vfatpipe(host, port)
+  local path = stdnse.get_script_args(SCRIPT_NAME .. ".path") or "/"
+  local response
+  local output_info = {}
+  local vsdwan = ""
+  local urlp = path
+
+  response = http.generic_request(host, port, "GET", path)
+
+  if response.status == 301 or response.status == 302 then
+    local url_parse_res = url.parse(response.header.location)
+    urlp = url_parse_res.path
+    stdnse.print_debug("Status code: " .. response.status)
+    response = http.generic_request(host,port,"GET", urlp)
+  end
+
+  output_info = stdnse.output_table()
+
+  if response == nil then
+    return fail("Request failed")
+  end
+
+  local try_counter = 1
+
+  while try_counter < 6 and response.status ~= 200 do
+    response = http.generic_request(host, port, "GET", urlp) 
+    try_counter = try_counter + 1
+  end
+
+  if response.status == 200 then
+
+    found, matches = http.response_contains(response, "<h5>([r.0-9]+)</h5>", false)
+    if found == true then vsdwan = matches[1] else return nil end
+    
+    output_info.vsdwan_version = {}
+    table.insert(output_info.vsdwan_version, "Fatpipe Version: " .. vsdwan)
+  end
+
+  return output_info, stdnse.format_output(true, output_info)
+
+end
+
+
+local function vnuage(host, port)
+  local path = stdnse.get_script_args(SCRIPT_NAME .. ".path") or "/"
+  local response
+  local output_info = {}
+  local vsdwan = ""
+  local urlp = path
+
+  response = http.generic_request(host, port, "GET", path)
+
+  if response.status == 301 or response.status == 302 then
+    local url_parse_res = url.parse(response.header.location)
+    urlp = url_parse_res.path
+    stdnse.print_debug("Status code: " .. response.status)
+    response = http.generic_request(host,port,"GET", urlp)
+  end
+
+  output_info = stdnse.output_table()
+
+  if response == nil then
+    return fail("Request failed")
+  end
+
+  local try_counter = 1
+
+  while try_counter < 6 and response.status ~= 200 do
+    response = http.generic_request(host, port, "GET", urlp) 
+    try_counter = try_counter + 1
+  end
+
+  if response.status == 200 then
+
+    found, matches = http.response_contains(response, 'ng%-version="([.0-9]+)"', false)
+    if found == true then vsdwan = matches[1] else return nil end
+    
+    output_info.vsdwan_version = {}
+    table.insert(output_info.vsdwan_version, "Nuage Version: " .. vsdwan)
+  end
+
+  return output_info, stdnse.format_output(true, output_info)
+
+end
+
+
+local function vriverbed(host, port)
+  local path = stdnse.get_script_args(SCRIPT_NAME .. ".path") or "/"
+  local response
+  local output_info = {}
+  local vsdwan = ""
+  local urlp = path
+
+  response = http.generic_request(host, port, "GET", path)
+
+  if response.status == 301 or response.status == 302 then
+    local url_parse_res = url.parse(response.header.location)
+    urlp = url_parse_res.path
+    stdnse.print_debug("Status code: " .. response.status)
+    response = http.generic_request(host,port,"GET", urlp)
+  end
+
+  output_info = stdnse.output_table()
+
+  if response == nil then
+    return fail("Request failed")
+  end
+
+  local try_counter = 1
+
+  while try_counter < 6 and response.status ~= 200 do
+    response = http.generic_request(host, port, "GET", urlp) 
+    try_counter = try_counter + 1
+  end
+
+  if response.status == 200 then
+
+    found, matches = http.response_contains(response, "web3 v([.0-9]+)", false)
+    if found == true then vsdwan = matches[1] else return nil end
+    
+    output_info.vsdwan_version = {}
+    table.insert(output_info.vsdwan_version, "Riverbed Version: " .. vsdwan)
+  end
+
+  return output_info, stdnse.format_output(true, output_info)
+
+end
+
+
+local function vsilverpeak(host, port)
+  local path = stdnse.get_script_args(SCRIPT_NAME .. ".path") or "/"
+  local response
+  local output_info = {}
+  local vsdwan = ""
+  local urlp = path
+
+  response = http.generic_request(host, port, "GET", path)
+
+  output_info = stdnse.output_table()
+
+  if response == nil then
+    return fail("Request failed")
+  end
+
+  if response.status == 302 then
+
+    found, matches = http.response_contains(response, "http.*/([.0-9]+)/", false)
+    if found == true then vsdwan = matches[1] else return nil end
+    
+    output_info.vsdwan_version = {}
+    table.insert(output_info.vsdwan_version, "SilverPeak Version: " .. vsdwan)
+  end
+
+  return output_info, stdnse.format_output(true, output_info)
+
+end
+
+
+local function vsonus_edge(host, port)
+  local path = stdnse.get_script_args(SCRIPT_NAME .. ".path") or "/cgi/index.php"
+  local response
+  local output_info = {}
+  local vsdwan = ""
+  local urlp = path
+
+  response = http.generic_request(host, port, "GET", path)
+
+  if response.status == 301 or response.status == 302 then
+    local url_parse_res = url.parse(response.header.location)
+    urlp = url_parse_res.path
+    stdnse.print_debug("Status code: " .. response.status)
+    response = http.generic_request(host,port,"GET", urlp)
+  end
+
+  output_info = stdnse.output_table()
+
+  if response == nil then
+    return fail("Request failed")
+  end
+
+  local try_counter = 1
+
+  while try_counter < 6 and response.status ~= 200 do
+    response = http.generic_request(host, port, "GET", urlp) 
+    try_counter = try_counter + 1
+  end
+
+  if response.status == 200 then
+
+    found, matches = http.response_contains(response, "/style/([.0-9]+)%-[0-9]+%_rel", false)
+    if found == true then vsdwan = matches[1] else return nil end
+    
+    output_info.vsdwan_version = {}
+    table.insert(output_info.vsdwan_version, "Sonus Edge Version: " .. vsdwan)
+  end
+
+  return output_info, stdnse.format_output(true, output_info)
+
+end
+
+
+local function vsonus_mgmt(host, port)
+  local path = stdnse.get_script_args(SCRIPT_NAME .. ".path") or "/"
+  local response
+  local output_info = {}
+  local vsdwan = ""
+  local urlp = path
+
+  response = http.generic_request(host, port, "GET", path)
+
+  if response.status == 301 or response.status == 302 then
+    local url_parse_res = url.parse(response.header.location)
+    urlp = url_parse_res.path
+    stdnse.print_debug("Status code: " .. response.status)
+    response = http.generic_request(host,port,"GET", urlp)
+  end
+
+  output_info = stdnse.output_table()
+
+  if response == nil then
+    return fail("Request failed")
+  end
+
+  local try_counter = 1
+
+  while try_counter < 6 and (response.status ~= 503 or response.status ~= 200) do
+    response = http.generic_request(host, port, "GET", urlp) 
+    try_counter = try_counter + 1
+  end
+
+  if response.status == 503 or response.status == 200 then
+
+    found, matches = http.response_contains(response, "EMA ([.0-9]+)", false)
+    if found == true then vsdwan = matches[1] else return nil end
+    
+    output_info.vsdwan_version = {}
+    table.insert(output_info.vsdwan_version, "Sonus Mgmt App Version: " .. vsdwan)
+  end
+
+  return output_info, stdnse.format_output(true, output_info)
+
+end
+
+
+local function vtalari(host, port)
+  local path = stdnse.get_script_args(SCRIPT_NAME .. ".path") or "/"
+  local response
+  local output_info = {}
+  local vsdwan = ""
+  local urlp = path
+
+  response = http.generic_request(host, port, "GET", path)
+
+  if response.status == 301 or response.status == 302 then
+    local url_parse_res = url.parse(response.header.location)
+    urlp = url_parse_res.path
+    stdnse.print_debug("Status code: " .. response.status)
+    response = http.generic_request(host,port,"GET", urlp)
+  end
+
+  output_info = stdnse.output_table()
+
+  if response == nil then
+    return fail("Request failed")
+  end
+
+  local try_counter = 1
+
+  while try_counter < 6 and response.status ~= 200 do
+    response = http.generic_request(host, port, "GET", urlp) 
+    try_counter = try_counter + 1
+  end
+
+  if response.status == 200 then
+
+    found, matches = http.response_contains(response, 'talari%.css%?([_.0-9A-Za-z]+)"', false)
+    if found == true then vsdwan = matches[1] else return nil end
+    
+    output_info.vsdwan_version = {}
+    table.insert(output_info.vsdwan_version, "Talari Version: " .. vsdwan)
+  end
+
+  return output_info, stdnse.format_output(true, output_info)
+
+end
+
+
+local function vversa_analytics(host, port)
+  local path = stdnse.get_script_args(SCRIPT_NAME .. ".path") or "/versa/app/js/common/constants.js"
+  local response
+  local output_info = {}
+  local vsdwan = ""
+  local urlp = path
+
+  response = http.generic_request(host, port, "GET", path)
+
+  if response.status == 301 or response.status == 302 then
+    local url_parse_res = url.parse(response.header.location)
+    urlp = url_parse_res.path
+    stdnse.print_debug("Status code: " .. response.status)
+    response = http.generic_request(host,port,"GET", urlp)
+  end
+
+  output_info = stdnse.output_table()
+
+  if response == nil then
+    return fail("Request failed")
+  end
+
+  local try_counter = 1
+
+  while try_counter < 6 and response.status ~= 200 do
+    response = http.generic_request(host, port, "GET", urlp) 
+
+    found, matches = http.response_contains(response, '0;url%=(.*)"%/%>')
+
+    if found == true then 
+      local urltmp = url.parse(matches[1])
+      urlp = urltmp.path
+      response = http.generic_request(host, port, "GET", urlp)
+      try_counter = 1
+    end
+    try_counter = try_counter + 1
+  end
+
+  if response.status == 200 then
+
+    found, matches = http.response_contains(response, "%/analytics%/([v.0-9]+)%/", false)
+    if found == true then vsdwan = matches[1] else return nil end
+    
+    output_info.vsdwan_version = {}
+    table.insert(output_info.vsdwan_version, "Versa Analytics Version: " .. vsdwan)
+  end
+
+  return output_info, stdnse.format_output(true, output_info)
+
+end
+
+
+local function vversa_flex(host, port)
+  local path = stdnse.get_script_args(SCRIPT_NAME .. ".path") or "/scripts/main-layout/main-layout-controller.js"
+  local response
+  local output_info = {}
+  local vsdwan = ""
+  local urlp = path
+
+  response = http.generic_request(host, port, "GET", path)
+
+  if response.status == 301 or response.status == 302 then
+    local url_parse_res = url.parse(response.header.location)
+    urlp = url_parse_res.path
+    stdnse.print_debug("Status code: " .. response.status)
+    response = http.generic_request(host,port,"GET", urlp)
+  end
+
+  output_info = stdnse.output_table()
+
+  if response == nil then
+    return fail("Request failed")
+  end
+
+  local try_counter = 1
+
+  while try_counter < 6 and response.status ~= 200 do
+    response = http.generic_request(host, port, "GET", urlp) 
+    try_counter = try_counter + 1
+  end
+
+  if response.status == 200 then
+
+    found, matches = http.response_contains(response, '"versa%-flexvnf%-([.0-9%-a-zA-Z]+)', false)
+    if found == true then vsdwan = matches[1] else return nil end
+    
+    output_info.vsdwan_version = {}
+    table.insert(output_info.vsdwan_version, "Versa Flex Version: " .. vsdwan)
+  end
+
+  return output_info, stdnse.format_output(true, output_info)
+
+end
+
+
+local function vvmware_nsx(host, port)
+  local path = stdnse.get_script_args(SCRIPT_NAME .. ".path") or "/"
+  local response
+  local output_info = {}
+  local vsdwan = ""
+  local urlp = path
+
+  response = http.generic_request(host, port, "GET", path)
+
+  if response.status == 301 or response.status == 302 then
+    local url_parse_res = url.parse(response.header.location)
+    urlp = url_parse_res.path
+    stdnse.print_debug("Status code: " .. response.status)
+    response = http.generic_request(host,port,"GET", urlp)
+  end
+
+  output_info = stdnse.output_table()
+
+  if response == nil then
+    return fail("Request failed")
+  end
+
+  local try_counter = 1
+
+  while try_counter < 6 and response.status ~= 200 do
+    response = http.generic_request(host, port, "GET", urlp) 
+    try_counter = try_counter + 1
+  end
+
+  if response.status == 200 then
+
+    found, matches = http.response_contains(response, "%/vco%-ui.([0-9.]+).", false)
+    if found == true then vsdwan = matches[1] else return nil end
+    
+    output_info.vsdwan_version = {}
+    table.insert(output_info.vsdwan_version, "VMware NSX Version: " .. vsdwan)
+  end
+
+  return output_info, stdnse.format_output(true, output_info)
+
+end
+
+
+-------------------------------------------------------------------------------
+-- version functions call table
+-------------------------------------------------------------------------------
+
+VERSION_CALL_TABLE = {
+  ["Citrix NetScaler SD-WAN VPX"] = {version = vcitrix},
+  ["Citrix NetScaler SD-WAN Center"] = {version = vcitrix},
+  ["Citrix Netscaler SD-WAN"] = {version = vcitrix},
+  ["Fatpipe SYMPHONY SD-WAN"] = {version = vfatpipe},
+  ["Nuage Networks SD-WAN (VNS)"] = {version = vnuage},
+  ["Riverbed SteelHead"] = {version = vriverbed},
+  ["Riverbed SteelConnect"] = {version = vriverbed},
+  ["Silver Peak Unity Orchestrator"] = {version = vsilverpeak},
+  ["Silver Peak Unity EdgeConnect"] = {version = vsilverpeak},
+  ["Sonus SBC Management Application"] = {version = vsonus_mgmt},
+  ["Sonus SBC Edge"] = {version = vsonus_edge},
+  ["Talari SD-WAN"] = {version = vtalari},
+  ["Versa Analytics"] = {version = vversa_analytics},
+  ["Versa Flex VNF"] = {version = vversa_flex},
+  ["VMWare NSX SD-WAN"] = {version = vvmware_nsx}
+}
+
+-------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
+
+local function get_version(product, host, port)
+  local version = nil
+  for version_product, _ in pairs(VERSION_CALL_TABLE) do
+    -- check if product in version list
+    if version_product == product then
+        version = VERSION_CALL_TABLE[product].version(host, port)
+    end
+  end
+  return version
+end
+
+local function ssl_name_to_table(name)
+  local output = {}
+  for k, v in pairs(name) do
+    if type(k) == "table" then
+      k = stdnse.strjoin(".", k)
+    end
+    output[k] = v
+  end
+  return output
+end
+
+
+local function collect_results(status, method, product, addr, port, version)
+  local output_tab = stdnse.output_table()
+  output_tab.status = status
+  output_tab.method = method
+  output_tab.product = product
+  output_tab.host_addr = addr
+  output_tab.host_port = port
+  if version ~= nil then
+    if version['vsdwan_version'] ~= nil then
+      parse = version['vsdwan_version'][1]
+      output_tab.version = string.match(parse, ': (.*)')
+    end
+  end
+  return output_tab
+end
+
+
+local function check_ssl(host, port, version_arg)
+  if not (shortport.ssl(host, port) or sslcert.isPortSupported(port) or sslcert.getPrepareTLSWithoutReconnect(port)) then
     return nil
   end
-  stdnse.print_debug("Get title: " .. title)
-  for product, titles in pairs(sd_wan_titles) do
+
+  local cert_status, cert = sslcert.getCertificate(host, port)
+  if not cert_status then
+    return nil
+  end
+  
+  ssl_subject = ssl_name_to_table(cert.subject)
+  if not ssl_subject then
+    return nil
+  end 
+
+  for product, titles in pairs(SDWANS_BY_SSL_TABLE) do
     for _, sd_wan_title in ipairs(titles) do
-      if string.match(title:lower(), sd_wan_title:lower()) then
-        stdnse.print_debug("Matched titles: " .. title)
-        return collect_results("success", "http-title", product, host.ip, port.number)
+      for _, ssl_field in pairs(ssl_subject) do
+        if string.match(ssl_field:lower(), sd_wan_title:lower()) then
+          stdnse.print_debug("Matched SSL certificates: " .. ssl_field)
+          local version = nil
+          if version_arg then
+            version = get_version(product, host, port)
+          end
+          return collect_results("success", "SSL certificate", product, host.ip, port.number, version)
+        end
       end
     end
   end
 end
 
-local function check_server(host, port)
-  if not (shortport.http(host, port) and nmap.version_intensity() >= 7) then
+
+local function check_snmp(host, port, version_arg)
+  if not shortport.portnumber(161, "udp", {"open"}) then
     return nil
   end
 
-  local sd_wan_servers = {
-      ["Versa Director"] = {"Versa Director"},
-      ["Barracuda CloudGen Firewall"] = {"Barracuda CloudGen Firewall"},
-      ["Viprinet Virtual VPN Hub"] = {"ViprinetHubReplacement", "Viprinet"}
-  }
+  local snmpHelper = snmp.Helper:new(host, port)
+  snmpHelper:connect()
+
+  local status, response = snmpHelper:get({reqId=28428}, "1.3.6.1.2.1.1.1.0")
+  if not status then
+    return nil
+  end
+
+  nmap.set_port_state(host, port, "open")
+  local result = response and response[1] and response[1][1]
+  if not result then
+    return nil
+  end
+
+  for product, titles in pairs(SDWANS_BY_SNMP_TABLE) do
+    for _, sd_wan_title in ipairs(titles) do
+      if string.match(result:lower(), sd_wan_title:lower()) then
+        stdnse.print_debug("Matched SNMP banners: " .. product)
+        -- override snmp port
+        local version = nil
+        if version_arg then
+          if product == "Versa Analytics" then
+            version = get_version(product, host, 8080)
+          end
+          if not version then
+            version = get_version(product, host, 80)
+          end
+        end
+        return collect_results("success", "snmp banner", product, host.ip, port.number, version)
+      end
+    end
+  end
+end
+
+
+local function check_title(host, port, version_arg)
+  if not shortport.http(host, port) then
+    return nil
+  end
+
+  local resp = http.get(host, port, "/")
+
+  --make redirect if needed
+  if resp.status == 301 or resp.status == 302 then
+    local url = url.parse( resp.header.location )
+    if url.host == host.targetname or url.host == ( host.name ~= '' and host.name ) or url.host == host.ip then
+      stdnse.print_debug("Redirect: " .. host.ip .. " -> " .. url.scheme.. "://" .. url.authority .. url.path)
+      resp = http.get(url.authority, 443, "/")
+    end
+  end
+
+  if not resp.body then
+    return nil
+  end
+
+  local title = string.match(resp.body, "<[Tt][Ii][Tt][Ll][Ee][^>]*>([^<]*)</[Tt][Ii][Tt][Ll][Ee]>")
+  if not title then
+    return nil
+  end
+  stdnse.print_debug("Get title: " .. title)
+  for product, titles in pairs(SDWANS_BY_TITLE_TABLE) do
+    for _, sd_wan_title in ipairs(titles) do
+      if string.match(title:lower(), sd_wan_title:lower()) then
+        stdnse.print_debug("Matched titles: " .. title)
+        local version = nil
+        if version_arg then
+          version = get_version(product, host, port)
+        end
+        return collect_results("success", "http-title", product, host.ip, port.number, version)
+      end
+    end
+  end
+end
+
+
+local function check_server(host, port, version_arg)
+  if not (shortport.http(host, port) and nmap.version_intensity() >= 7) then
+    return nil
+  end
 
   local responses = {}
   if port.version and port.version.service_fp then
@@ -265,7 +792,6 @@ local function check_server(host, port)
   end
 
   if #responses == 0 then
-    -- Have to send the probe ourselves.
     local socket, result = comm.tryssl(host, port, "GET / HTTP/1.0\r\n\r\n")
 
     if not socket then
@@ -308,13 +834,16 @@ local function check_server(host, port)
     end
   end
 
-    -- check if we got SD-WAN solution on this server
-  for product, servers in pairs(sd_wan_servers) do
+  for product, servers in pairs(SDWANS_BY_SERVER_TABLE) do
     for _, sd_wan_server in ipairs(servers) do
       for recv_server, _ in pairs(headers) do
         if string.match(recv_server:lower(), sd_wan_server:lower()) then
           stdnse.print_debug("Matched servers: " .. recv_server)
-          return collect_results("success", "http-server", product, host.ip, port.number)
+          local version = nil
+          if version_arg then
+            version = get_version(product, host, port)
+          end
+          return collect_results("success", "http-server", product, host.ip, port.number, version)
         end
       end
     end
@@ -323,21 +852,28 @@ end
 
 
 action = function(host, port)
+  version_arg = stdnse.get_script_args(SCRIPT_NAME..".version")
+  if version_arg == 'true' then
+    version_arg = true
+  else
+    version_arg = false
+  end
+
   -- get title and server from http/https
   if (port.number == 443 or port.number == 80) then
-    local title_tab = check_title(host, port)
+    local title_tab = check_title(host, port, version_arg)
     if title_tab then
       return title_tab
     end
 
-    local server_tab = check_server(host, port)
+    local server_tab = check_server(host, port, version_arg)
     if server_tab then
       return server_tab
     end
 
   -- check ssl cert from https
   if port.number == 443 then
-    local ssl_tab = check_ssl(host, port)
+    local ssl_tab = check_ssl(host, port, version_arg)
     if ssl_tab then
       return ssl_tab
     end
@@ -345,7 +881,7 @@ action = function(host, port)
 
   -- get snmp banner by 161 udp
   elseif port.number == 161 then
-    local snmp_tab = check_snmp(host, port)
+    local snmp_tab = check_snmp(host, port, version_arg)
     if snmp_tab then
       return snmp_tab
     end
