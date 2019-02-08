@@ -70,7 +70,7 @@ license = "Same as Nmap--See https://nmap.org/book/man-legal.html"
 categories = {"default", "discovery", "safe"}
 
 
-portrule = shortport.portnumber({80, 161, 443}, {"tcp", "udp"}, {"open"})
+portrule = shortport.portnumber({80, 161, 443, 8008}, {"tcp", "udp"}, {"open"})
 
 SDWANS_BY_SSL_TABLE = {
   ["Cisco SD-WAN"] = {"Viptela Inc"},
@@ -944,12 +944,58 @@ local function check_server(host, port, version_arg)
 end 
 
 
+local function check_fortinet(host, port, version_arg)
+  if not shortport.http(host, port) then
+    return nil
+  end
+
+  local resp = http.get(host, port, "/")
+
+  -- make redirect if needed
+  if resp.status == 301 or resp.status == 302 then
+    local url = url.parse( resp.header.location )
+    if url.host == host.targetname or url.host == ( host.name ~= '' and host.name ) or url.host == host.ip then
+      stdnse.print_debug("Redirect: " .. host.ip .. " -> " .. url.scheme.. "://" .. url.authority .. url.path)
+      -- extract redirect port
+      redir_port = string.match(url.authority, ":(%d+)")
+      stdnse.print_debug("Redirect port is: " .. redir_port)
+      stdnse.print_debug("Trying to get " .. host.ip .. " at " .. redir_port .. " port")
+      -- get Fortinet login page at custom port
+      resp = http.get(host.ip, tonumber(redir_port), "/login")
+    end
+  end
+
+  if not resp.body then
+    return nil
+  end
+
+  -- check if it Fortinet or not
+  if string.match(resp.body:lower(), "html") then
+    stdnse.print_debug("Found HTML page")
+    if string.match(resp.body:lower(), "fortinet") then
+      stdnse.print_debug("Found Fortinet SD-WAN")
+      return collect_results("success", "Fortinet Custom Method", "Fortinet FortiGate SD-WAN", host.ip, redir_port, nil)
+    end
+  end
+
+end
+
+
+-- main function
 action = function(host, port)
   version_arg = stdnse.get_script_args(SCRIPT_NAME..".version") or "false"
   if version_arg == "true" then
     version_arg = true
   else
     version_arg = false
+  end
+
+  -- check fortinet
+  if (port.number == 8008) then
+    local results = check_fortinet(host, port, version_arg)
+    if results then
+      return results
+    end
   end
 
   -- get title and server from http/https
