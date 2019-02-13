@@ -692,6 +692,49 @@ local function vvmware_nsx(host, port)
 end
 
 
+local function fortinet(host, port)
+  local resp_js_path, js_path, resp_js
+  local conf_build, conf_model, conf_label
+  local output_info = {}
+  local version
+
+  -- trigger 401 error to find path to js file with version
+  resp_js_path = http.get(host, port, "/api")
+  if not resp_js_path.body then
+    return nil
+  end
+
+  -- search for js file that contains version
+  js_path = string.match(resp_js_path.body:lower(), "<script src=\"(/%w+/fweb_all.js)")
+  if not js_path then
+    return nil
+  end
+  stdnse.print_debug("Found js path: " .. js_path)
+
+  -- get founded js and grep for version
+  resp_js = http.get(host, port, js_path)
+  if not resp_js_path.body then
+    return nil
+  end
+  stdnse.print_debug("Js - founded")
+
+  -- parse versions
+  conf_build = string.match(resp_js.body, "CONFIG_BUILD_NUMBER:(%d+)")
+  conf_model = string.match(resp_js.body, "CONFIG_MODEL:\"([%w_]+)\"")
+  conf_label = string.match(resp_js.body, "CONFIG_BUILD_LABEL:\"([%w_]+)\"")
+  if (not conf_build) or (not conf_model) or (not conf_label) then
+    return nil
+  end
+
+  output_info = stdnse.output_table()
+  output_info.vsdwan_version = {}
+
+  version = "build " .. conf_build .. ", model " .. conf_model .. " (" .. conf_label .. ")"
+  table.insert(output_info.vsdwan_version, "Fortinet FortiGate Version: " .. version)
+  return output_info, stdnse.format_output(true, output_info)
+end
+
+
 -------------------------------------------------------------------------------
 -- version functions call table
 -------------------------------------------------------------------------------
@@ -713,7 +756,8 @@ VERSION_CALL_TABLE = {
   ["Versa Flex VNF"] = {version = vversa_flex},
   ["VMWare NSX SD-WAN"] = {version = vvmware_nsx},
   ["Cradlepoint SD-WAN"] = {version = vcradlepoint},
-  ["Brain4Net Orchestrator"] = {version = vbrain}
+  ["Brain4Net Orchestrator"] = {version = vbrain},
+  ["Fortinet FortiGate SD-WAN"] = {version = fortinet}
 }
 
 -------------------------------------------------------------------------------
@@ -950,6 +994,7 @@ local function check_fortinet(host, port, version_arg)
   end
 
   local resp = http.get(host, port, "/")
+  local version = nil
 
   -- make redirect if needed
   if resp.status == 301 or resp.status == 302 then
@@ -970,14 +1015,16 @@ local function check_fortinet(host, port, version_arg)
   end
 
   -- check if it Fortinet or not
-  if string.match(resp.body:lower(), "html") then
-    stdnse.print_debug("Found HTML page")
-    if string.match(resp.body:lower(), "fortinet") then
-      stdnse.print_debug("Found Fortinet SD-WAN")
-      return collect_results("success", "Fortinet Custom Method", "Fortinet FortiGate SD-WAN", host.ip, redir_port, nil)
-    end
+  if not string.match(resp.body:lower(), "fortinet") then
+    return nil
   end
+  stdnse.print_debug("Found Fortinet SD-WAN")
 
+  -- get version
+  if version_arg then
+    version = get_version("Fortinet FortiGate SD-WAN", host.ip, tonumber(redir_port))
+  end
+  return collect_results("success", "Fortinet Custom Method", "Fortinet FortiGate SD-WAN", host.ip, redir_port, version)
 end
 
 
