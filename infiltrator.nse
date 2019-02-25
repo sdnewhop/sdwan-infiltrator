@@ -29,7 +29,7 @@ Also this script is based on:
 
 -- 
 -- @usage
--- nmap --script=infiltrator.nse -sS -sU -p U:161,T:80,443 <target> or -iL <targets.txt>
+-- nmap --script=infiltrator.nse -sS -sU -p U:161,T:80,443,8008,8080,8443 <target> or -iL <targets.txt>
 -- 
 -- @output
 -- | infiltrator:
@@ -70,7 +70,7 @@ license = "Same as Nmap--See https://nmap.org/book/man-legal.html"
 categories = {"default", "discovery", "safe"}
 
 
-portrule = shortport.portnumber({80, 161, 443, 8008}, {"tcp", "udp"}, {"open"})
+portrule = shortport.portnumber({80, 161, 443, 8008, 8080, 8443}, {"tcp", "udp"}, {"open"})
 
 SDWANS_BY_SSL_TABLE = {
   ["Cisco SD-WAN"] = {"Viptela Inc"},
@@ -132,6 +132,7 @@ SDWANS_BY_TITLE_TABLE = {
 
 SDWANS_BY_SERVER_TABLE = {
       ["Versa Director"] = {"Versa Director"},
+      ["Versa Analytics"] = {"Versa%-Analytics%-Server"},
       ["Barracuda CloudGen Firewall"] = {"Barracuda CloudGen Firewall"},
       ["Viprinet Virtual VPN Hub"] = {"ViprinetHubReplacement", "Viprinet"}
   }
@@ -735,6 +736,58 @@ local function fortinet(host, port)
 end
 
 
+local function vversa_analytics_server(host, port)
+  local path = stdnse.get_script_args(SCRIPT_NAME .. ".path") or "/versa/analytics/version"
+  local response
+  local output_info = {}
+  local vsdwan = ""
+  local urlp = path
+
+  response = http.generic_request(host, port, "GET", path)
+
+  if response.status == 301 or response.status == 302 then
+    local url_parse_res = url.parse(response.header.location)
+    urlp = url_parse_res.path
+    stdnse.print_debug("Status code: " .. response.status)
+    response = http.generic_request(host,port,"GET", urlp)
+  end
+
+  output_info = stdnse.output_table()
+
+  if response == nil then
+    return fail("Request failed")
+  end
+
+  local try_counter = 1
+
+  while try_counter < 6 and response.status ~= 200 do
+    response = http.generic_request(host, port, "GET", urlp)
+
+    found, matches = http.response_contains(response, '0;url%=(.*)"%/%>')
+
+    if found == true then
+      local urltmp = url.parse(matches[1])
+      urlp = urltmp.path
+      response = http.generic_request(host, port, "GET", urlp)
+      try_counter = 1
+    end
+    try_counter = try_counter + 1
+  end
+
+  if response.status == 200 then
+
+    found, matches = http.response_contains(response, '"release":"([%w.]+)",', false)
+    if found == true then vsdwan = matches[1] else return nil end
+
+    output_info.vsdwan_version = {}
+    table.insert(output_info.vsdwan_version, "Versa Analytics Server Version: " .. vsdwan)
+  end
+
+  return output_info, stdnse.format_output(true, output_info)
+
+end
+
+
 -------------------------------------------------------------------------------
 -- version functions call table
 -------------------------------------------------------------------------------
@@ -753,6 +806,7 @@ VERSION_CALL_TABLE = {
   ["Sonus SBC Edge"] = {version = vsonus_edge},
   ["Talari SD-WAN"] = {version = vtalari},
   ["Versa Analytics"] = {version = vversa_analytics},
+  ["Versa Analytics"] = {version = vversa_analytics_server},
   ["Versa Flex VNF"] = {version = vversa_flex},
   ["VMWare NSX SD-WAN"] = {version = vvmware_nsx},
   ["Cradlepoint SD-WAN"] = {version = vcradlepoint},
@@ -769,6 +823,9 @@ local function get_version(product, host, port)
     -- check if product in version list
     if version_product == product then
         version = VERSION_CALL_TABLE[product].version(host, port)
+        if version ~= nil then
+          return version
+        end
     end
   end
   return version
@@ -1046,7 +1103,7 @@ action = function(host, port)
   end
 
   -- get title and server from http/https
-  if (port.number == 443 or port.number == 80) then
+  if (port.number == 443 or port.number == 80 or port.number == 8080 or port.number == 8443) then
     local title_tab = check_title(host, port, version_arg)
     if title_tab then
       return title_tab
