@@ -10,6 +10,7 @@ local snmp = require "snmp"
 local sslcert = require "sslcert"
 local tls = require "tls"
 local url = require "url"
+local json = require "json"
 
 description = [[
 Search SD-WAN products from SDWAN NewHope research project database by
@@ -742,6 +743,11 @@ local function vversa_analytics_server(host, port)
   local output_info = {}
   local vsdwan = ""
   local urlp = path
+  local auth_credentials = {}
+  auth_credentials.username = 'vanclient'
+  auth_credentials.password = '88347b9e8s6$90d9f31te366&d5be77'
+  local options = {}
+  options.auth = auth_credentials
 
   response = http.generic_request(host, port, "GET", path)
 
@@ -753,18 +759,14 @@ local function vversa_analytics_server(host, port)
   end
 
   output_info = stdnse.output_table()
-
   if response == nil then
     return fail("Request failed")
   end
 
   local try_counter = 1
-
   while try_counter < 6 and response.status ~= 200 do
     response = http.generic_request(host, port, "GET", urlp)
-
     found, matches = http.response_contains(response, '0;url%=(.*)"%/%>')
-
     if found == true then
       local urltmp = url.parse(matches[1])
       urlp = urltmp.path
@@ -775,12 +777,31 @@ local function vversa_analytics_server(host, port)
   end
 
   if response.status == 200 then
-
     found, matches = http.response_contains(response, '"release":"([%w.]+)",', false)
     if found == true then vsdwan = matches[1] else return nil end
-
     output_info.vsdwan_version = {}
     table.insert(output_info.vsdwan_version, "Versa Analytics Server Version: " .. vsdwan)
+  end
+
+  response = http.generic_request(host, 5000, "GET", "/", options)
+  if response.status == 200 and response.body ~= nil then
+    output_info.additional_version = response.body
+  end
+
+  response = http.generic_request(host, 5000, "GET", "/analytics/system/info", options)
+  if response.status == 200 and response.body ~= nil then
+    status, json_repr = json.parse(response.body)
+    if status == true then
+      output_info.sys_info = json_repr
+    end
+  end
+
+  response = http.generic_request(host, 5000, "GET", "/analytics/tools/status", options)
+  if response.status == 200 and response.body ~= nil then
+    status, json_repr = json.parse(response.body)
+    if status == true then
+      output_info.sys_status = json_repr
+    end
   end
 
   return output_info, stdnse.format_output(true, output_info)
@@ -855,8 +876,17 @@ local function collect_results(status, method, product, addr, port, version)
       parse = version['vsdwan_version'][1]
       output_tab.version = string.match(parse, ': (.*)')
     end
+    if version['additional_version'] ~= nil then
+      output_tab.additional_version = version['additional_version']
+    end
+    if version['sys_info'] ~= nil then
+      output_tab.system_info = version['sys_info']
+    end
+    if version['sys_status'] ~= nil then
+      output_tab.system_status = version['sys_status']
+    end
   end
-  return output_tab
+  return output_tab, stdnse.format_output(true, output_tab)
 end
 
 
