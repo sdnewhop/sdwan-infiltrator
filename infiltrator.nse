@@ -426,6 +426,35 @@ local function vsilverpeak(host, port)
 
 end
 
+local function vsilverpeak_login(host, port)
+  local output_info = {}
+  output_info.login = {}
+  local monitor_check = "/rest/json/login?user=monitor&password=monitor"
+  local admin_check = "/rest/json/login?user=admin&password=admin"
+
+  local resp_monitor = http.get(host, port, monitor_check)
+  if not resp_monitor.status then
+    -- force check on 80 port if empty response from 443 (by default)
+    resp_monitor = http.get(host, 80, monitor_check)
+  end
+  if resp_monitor.status == 200 then
+    table.insert(output_info.login, "Authentication successful (monitor:monitor)")
+  end
+
+  local resp_admin = http.get(host, port, admin_check)
+  if not resp_admin.status then
+    -- force check on 80 port if empty response from 443 (by default)
+    resp_admin = http.get(host, 80, admin_check)
+  end
+  if resp_admin.status == 200 then
+    table.insert(output_info.login, "Authentication successful (admin:admin)")
+  end
+
+  if next(output_info.login) ~= nil then
+    return output_info, stdnse.format_output(true, output_info)
+  end
+end
+
 
 local function vsonus_edge(host, port)
   local path = stdnse.get_script_args(SCRIPT_NAME .. ".path") or "/cgi/index.php"
@@ -823,6 +852,7 @@ VERSION_CALL_TABLE = {
   ["Riverbed SteelConnect"] = {version = vriverbed},
   ["Silver Peak Unity Orchestrator"] = {version = vsilverpeak},
   ["Silver Peak Unity EdgeConnect"] = {version = vsilverpeak},
+  ["Silver Peak Unity EdgeConnect"] = {version = vsilverpeak_login},
   ["Sonus SBC Management Application"] = {version = vsonus_mgmt},
   ["Sonus SBC Edge"] = {version = vsonus_edge},
   ["Talari SD-WAN"] = {version = vtalari},
@@ -884,6 +914,9 @@ local function collect_results(status, method, product, addr, port, version)
     end
     if version['sys_status'] ~= nil then
       output_tab.system_status = version['sys_status']
+    end
+    if version['login'] ~= nil then
+      output_tab.login = version['login']
     end
   end
   return output_tab, stdnse.format_output(true, output_tab)
