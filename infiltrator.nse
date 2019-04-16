@@ -128,7 +128,8 @@ SDWANS_BY_TITLE_TABLE = {
     ["Viprinet Virtual VPN Hub"] = {"Viprinet %- AdminDesk %- Login"},
     ["Viprinet Traffic Tools"] = {"Viprinet traffic tools"},
     ["Cradlepoint SD-WAN"] = {"Login :: CR4250%-PoE", "Login :: AER2200%-600M"},
-    ["Brain4Net Orchestrator"] = {"B4N ORC"}
+    ["Brain4Net Orchestrator"] = {"B4N ORC"},
+    ["Fortinet FortiManager"] = {"FortiManager%-VM64"}
   }
 
 SDWANS_BY_SERVER_TABLE = {
@@ -1001,13 +1002,36 @@ local function check_title(host, port, version_arg)
   end
 
   local resp = http.get(host, port, "/")
+  found, matches = http.response_contains(resp, "top.location='(.+)';")
+  if found == true then
+    resp = http.get(host, port, matches[1])
+  end
 
-  --make redirect if needed
+  -- make redirect if needed
   if resp.status == 301 or resp.status == 302 then
-    local url = url.parse( resp.header.location )
-    if url.host == host.targetname or url.host == ( host.name ~= '' and host.name ) or url.host == host.ip then
-      stdnse.print_debug("Redirect: " .. host.ip .. " -> " .. url.scheme.. "://" .. url.authority .. url.path)
-      resp = http.get(url.authority, 443, "/")
+    local url_parsed = url.parse(resp.header.location)
+    local redirect_path = url_parsed.path or "/"
+
+    -- detect right port to redirect (by location parsing or by default scheme port)
+    local existed_scheme = nil
+    if url_parsed.scheme then
+      existed_scheme = url.get_default_port(url_parsed.scheme)
+    end
+    local redirect_port = url_parsed.port or existed_scheme
+
+    -- port of last hope (in a case when we can't parse port from location or scheme)
+    if not redirect_port then
+      redirect_port = 443
+    end
+
+    if url_parsed.host == host.targetname or url_parsed.host == (host.name ~= '' and host.name) or url_parsed.host == host.ip then
+      stdnse.print_debug("Redirect: " .. host.ip .. " -> " .. url_parsed.scheme.. "://" .. url_parsed.authority .. url_parsed.path)
+      resp = http.get(host.ip, redirect_port, redirect_path)
+      -- redirect to the path from top.location in body (for example, Fortinet, etc.)
+      found, matches = http.response_contains(resp, "top.location='(.+)';")
+      if found == true then
+        resp = http.get(host.ip, redirect_port, matches[1])
+      end
     end
   end
 
