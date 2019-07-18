@@ -1,5 +1,5 @@
 # SD-WAN Infiltrator
-`SD-WAN Infiltrator` is an NSE script to automatically discover SD-WAN nodes in a local network. It uses [SD-WAN Census Database](https://github.com/sdnewhop/sdwannewhope/blob/master/census.md).
+`SD-WAN Infiltrator` is an NSE script to automatically discover SD-WAN nodes in a local network. It uses [SD-WAN Census Database](https://github.com/sdnewhop/sdwannewhope/blob/master/docs/census.md).
 
 # Dependencies
 Nmap libraries:
