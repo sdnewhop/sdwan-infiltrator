@@ -31,4 +31,4 @@ url
 nmap --script infiltrator --script-args infiltrator.version=true -sS -sU -p U:161,T:80,443,8008,8080,8443 <target> or -iL <targets.txt>
 ```
 # Example
-![Output example](output.png)
+![Output example](screenshot.png)
